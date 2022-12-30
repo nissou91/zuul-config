@@ -1,0 +1,14 @@
+---
+- hosts: controller
+  tasks:
+    - name: Install podman
+      package:
+        name: podman
+        state: present
+      become: true
+    - name: Login brew.registry.redhat.io
+      command: "podman login --username {{ rhsm.login }} --password '{{ rhsm.password }}' brew.registry.redhat.io"
+      no_log: true
+    - name: Login registry.redhat.io
+      command: "podman login --username {{ rhsm.login }} --password '{{ rhsm.password }}' registry.redhat.io"
+      no_log: true

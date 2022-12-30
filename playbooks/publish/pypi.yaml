@@ -1,0 +1,30 @@
+---
+- hosts: controller
+  tasks:
+    - name: Find tarballs and wheels in dist folder
+      find:
+        file_type: file
+        paths: "src/{{ zuul.project.canonical_name }}/dist"
+        patterns: "*.tar.gz,*.whl"
+      register: result
+
+    - name: Display stat for tarballs and wheels
+      stat:
+        path: "{{ item.path }}"
+      with_items: "{{ result.files }}"
+    - name: Publish artifacts to pypi
+      block:
+        - name: Create virtualenv for twine
+          shell: python3 -m venv ~/venv
+
+        - name: Install twine into virtualenv
+          shell: ~/venv/bin/pip install twine
+
+        - name: Run upload-pypi role
+          include_role:
+            name: upload-pypi
+          vars:
+            pypi_path: "src/{{ zuul.project.canonical_name }}/dist"
+            pypi_twine_executable: ~/venv/bin/twine
+
+      when: zuul_success | bool

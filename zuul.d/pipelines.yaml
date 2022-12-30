@@ -1,0 +1,402 @@
+---
+- pipeline:
+    name: check
+    description: |
+      Newly uploaded patchsets enter this pipeline to receive an
+      initial +/-1 Verified vote.
+    manager: independent
+    precedence: normal
+    trigger:
+      github.com:
+        - event: pull_request
+          action:
+            - opened
+            - changed
+            - reopened
+        - event: pull_request
+          action: comment
+          comment: (?i)^\s*recheck\s*$
+        - event: check_run
+          action: rerequested
+          check: "ansible-zuul:ansible/check:failure"
+    start:
+      github.com:
+        check: in_progress
+        comment: false
+    success:
+      github.com:
+        check: success
+        comment: false
+    failure:
+      github.com:
+        check: failure
+        comment: false
+    dequeue:
+      github.com:
+        check: skipped
+        comment: false
+
+- pipeline:
+    name: gate
+    description: |
+      Changes that have been approved by core developers are enqueued
+      in order in this pipeline, and if they pass tests, will be
+      merged.
+    success-message: Build succeeded (gate pipeline).
+    failure-message: |
+      Build failed (gate pipeline).  For information on how to proceed, see
+      http://docs.openstack.org/infra/manual/developers.html#automated-testing
+    manager: dependent
+    precedence: high
+    supercedes: check
+    require:
+      github.com:
+        label: gate
+        open: true
+        current-patchset: true
+    trigger:
+      github.com:
+        - event: check_run
+          action: completed
+          check: "ansible-zuul:ansible/check:success"
+        - event: pull_request_review
+          action: submitted
+          state: approved
+        - event: pull_request
+          action: labeled
+          label: gate
+        - event: pull_request
+          action: comment
+          comment: (?i)^\s*recheck\s*$
+    start:
+      github.com:
+        check: in_progress
+        comment: false
+    success:
+      github.com:
+        check: success
+        comment: false
+        merge: true
+    failure:
+      github.com:
+        check: failure
+        comment: false
+    dequeue:
+      github.com:
+        check: cancelled
+        comment: false
+    window-floor: 20
+    window-increase-factor: 2
+
+- pipeline:
+    name: post
+    description: |
+      This pipeline runs jobs that operate after each change is
+      merged. Queue items are identified by the abbreviated hash (git
+      log --format=%h) of the merge commit.
+    manager: supercedent
+    precedence: high
+    post-review: true
+    trigger:
+      github.com:
+        - event: push
+          ref: ^refs/heads/.*$
+
+- pipeline:
+    name: promote
+    description: |
+      This pipeline runs jobs that operate after each change is merged
+      in order to promote artifacts generated in the gate pipeline.
+    success-message: Build succeeded (promote pipeline).
+    failure-message: |
+      Build failed (promote pipeline).  For information on how to proceed, see
+      http://docs.openstack.org/infra/manual/developers.html#automated-testing
+    manager: supercedent
+    precedence: high
+    post-review: true
+    trigger:
+      github.com:
+        - event: pull_request
+          action: closed
+    require:
+      github.com:
+        merged: true
+    success:
+      github.com:
+        status: success
+    failure:
+      github.com:
+        status: failure
+
+- pipeline:
+    name: tag
+    description: This pipeline runs jobs in response to any tag event.
+    manager: independent
+    precedence: high
+    post-review: true
+    trigger:
+      github.com:
+        - event: push
+          ref: ^refs/tags/.*$
+
+- pipeline:
+    name: pre-release
+    description: When a commit is tagged with a pre-release tag, this pipeline runs jobs that publish archives and documentation.
+    manager: independent
+    precedence: high
+    post-review: true
+    trigger:
+      github.com:
+        - event: push
+          ref: ^refs/tags/(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-?((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)$
+
+- pipeline:
+    name: release
+    description: When a commit is tagged as a release, this pipeline runs jobs that publish archives and documentation.
+    manager: independent
+    precedence: high
+    post-review: true
+    trigger:
+      github.com:
+        - event: push
+          ref: ^refs/tags/(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$
+    success:
+      smtp:
+        from: ansible-zuul@redhat.com
+        to: ansible-zuul@redhat.com
+        subject: 'Release of {change.project} for ref {change.ref} successful'
+    failure:
+      smtp:
+        from: ansible-zuul@redhat.com
+        to: ansible-zuul@redhat.com
+        subject: 'Release of {change.project} for ref {change.ref} failed'
+
+- pipeline:
+    name: periodic
+    post-review: true
+    description: Jobs in this queue are triggered daily.
+    manager: independent
+    precedence: low
+    trigger:
+      timer:
+        - time: '0 0 * * *'
+    failure:
+      smtp:
+        from: ansible-zuul@redhat.com
+        to: ansible-zuul@redhat.com
+        subject: 'Periodic check of {change.project} for ref {change.ref} failed'
+
+- pipeline:
+    name: periodic-1hr
+    post-review: true
+    description: Jobs in this queue are triggered hourly.
+    manager: independent
+    precedence: low
+    trigger:
+      timer:
+        - time: '0 * * * *'
+
+- pipeline:
+    name: periodic-6hr
+    post-review: true
+    description: Jobs in this queue are triggered every 6 hours.
+    manager: independent
+    precedence: low
+    trigger:
+      timer:
+        - time: '0 */6 * * *'
+
+- pipeline:
+    name: periodic-weekly
+    post-review: true
+    description: Jobs in this queue are triggered on a weekly timer.
+    manager: independent
+    precedence: low
+    trigger:
+      timer:
+        # Saturday 8am UTC is a better time to start weekend jobs, as Sunday
+        # is a working day in some geographies.
+        - time: '0 8 * * 6'
+
+- pipeline:
+    name: ondemand
+    description: On-demand pipeline for requesting a run of optional tests in a collection. Leave review comment of "check ondemand" to run jobs in this pipeline.
+    manager: independent
+    precedence: low
+    trigger:
+      github.com:
+        - event: pull_request
+          action: comment
+          comment: (?i)^\s*check ondemand\s*$
+    start:
+      github.com:
+        check: in_progress
+        comment: false
+    success:
+      github.com:
+        check: success
+        comment: false
+    failure:
+      github.com:
+        check: failure
+        comment: false
+
+- pipeline:
+    name: unlabel-on-push
+    description: |
+      If a PR is pushed to and has the gate label, we want to remove that.
+    manager: independent
+    precedence: high
+    trigger:
+      github.com:
+        - event: pull_request
+          action:
+            - changed
+    require:
+      github.com:
+        label:
+          - gate
+    success:
+      github.com:
+        unlabel:
+          - gate
+        comment: false
+
+- pipeline:
+    name: lgtm
+    description: |
+      A pipeline to run lgtm jobs.
+    manager: independent
+    precedence: high
+    reject:
+      github.com:
+        review:
+          - type: approved
+            username: "ansible-zuul\\[bot\\]"
+    require:
+      github.com:
+        label: gate
+        open: true
+        current-patchset: true
+    trigger:
+      github.com:
+        - event: pull_request
+          action: labeled
+          label: gate
+        - event: pull_request
+          action: comment
+          comment: (?i)^\s*recheck\s*$
+    success:
+      github.com:
+        comment: false
+        review: approve
+        review-body: "LGTM!"
+
+- pipeline:
+    name: third-party-check
+    # ⚠️  you should probably use 3pci-check instead of this pipeline
+    # the plan is to deprecate third-party-check, now that we have the 2nd
+    # GitHub app working
+    # The main issue today is we need someone to add the 3pci github app to
+    # all the exiting 3pci projects listed in zuul tenant config. then we
+    # can remove this pipeline
+    description: |
+      Newly uploaded patchsets to projects that are external to Ansible
+      enter this pipeline to receive an initial +/-1 Verified vote.
+    success-message: Build succeeded (third-party-check pipeline).
+    # TODO(mordred) We should write a document for non-OpenStack developers
+    failure-message: |
+      Build failed (third-party-check pipeline) integration testing with
+      Ansible.
+    manager: independent
+    precedence: low
+    trigger:
+      github.com:
+        - event: pull_request
+          action:
+            - opened
+            - changed
+            - reopened
+        - event: pull_request
+          action: comment
+          comment: (?i)^\s*recheck\s*$
+    start:
+      github.com:
+        check: in_progress
+        comment: false
+    success:
+      github.com:
+        check: success
+        comment: false
+    failure:
+      github.com:
+        check: failure
+        comment: false
+    # Don't report merge-failures to github.com
+    merge-failure: {}
+
+- pipeline:
+    name: 3pci-check
+    description: |
+      Newly uploaded patchsets to projects that are external to Ansible
+      enter this pipeline to receive an initial +/-1 Verified vote.
+    success-message: Build succeeded (third-party-check pipeline).
+    # TODO(mordred) We should write a document for non-OpenStack developers
+    failure-message: |
+      Build failed (third-party-check pipeline) integration testing with
+      Ansible.
+    manager: independent
+    precedence: low
+    trigger:
+      github-3pci:
+        - event: pull_request
+          action:
+            - opened
+            - changed
+            - reopened
+        - event: pull_request
+          action: comment
+          comment: (?i)^\s*recheck\s*$
+    start:
+      github-3pci:
+        check: in_progress
+        comment: false
+    success:
+      github-3pci:
+        check: success
+        comment: false
+    failure:
+      github-3pci:
+        check: failure
+        comment: false
+    dequeue:
+      github-3pci:
+        check: cancelled
+        comment: false
+    # Don't report merge-failures to github.com
+    merge-failure: {}
+
+- pipeline:
+    name: third-party-check-silent
+    description: |
+      Newly uploaded patchsets to projects that are external to Ansible
+      enter this pipeline to receive an initial +/-1 Verified vote.
+    success-message: Build succeeded (third-party-check pipeline).
+    # TODO(mordred) We should write a document for non-OpenStack developers
+    failure-message: |
+      Build failed (third-party-check pipeline) integration testing with
+      Ansible.
+    manager: independent
+    precedence: low
+    trigger:
+      github.com:
+        - event: pull_request
+          action:
+            - opened
+            - changed
+            - reopened
+        - event: pull_request
+          action: comment
+          comment: (?i)^\s*recheck\s*$
+    # Don't report merge-failures to github.com
+    merge-failure: {}

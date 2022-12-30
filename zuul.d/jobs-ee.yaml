@@ -1,0 +1,21 @@
+---
+- job:
+    name: ansible-buildset-registry
+    description: |
+      Dummy job that do nothing.
+    pre-run: []
+    run: []
+    post-run: []
+
+- job:
+    name: ansible-buildset-registry-consumer
+    description: |
+      Dummy job that do nothing.
+    pre-run: []
+
+- job:
+    name: ansible-upload-container-image
+    parent: ansible-build-container-image
+    description: |
+      Dummy job that do nothing.
+    post-run: []
